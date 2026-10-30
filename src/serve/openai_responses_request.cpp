@@ -951,7 +951,14 @@ void parse_reasoning(const Json& body, OpenAIResponsesPromptRequest& out) {
     static const std::unordered_set<std::string> allowed = {"effort", "context", "summary",
                                                             "generate_summary", "mode"};
     reject_nonnull_unknown_members(reasoning, allowed, "reasoning");
-    for (const char* key : {"context", "summary", "generate_summary", "mode"}) {
+    // Accept the summary preference for compatibility; responses still report summary:null.
+    if (reasoning.contains("summary") && !reasoning.at("summary").is_null()) {
+        const Json& summary = reasoning.at("summary");
+        if (summary != "auto" && summary != "concise" && summary != "detailed") {
+            bad_request("reasoning.summary must be auto, concise, or detailed", "reasoning");
+        }
+    }
+    for (const char* key : {"context", "generate_summary", "mode"}) {
         if (reasoning.contains(key) && !reasoning.at(key).is_null()) {
             bad_request("reasoning." + std::string(key) +
                             " changes reasoning input or output and is not supported",

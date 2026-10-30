@@ -24,9 +24,12 @@ RUN cmake -S . -B /build -G Ninja \
         -DCMAKE_CUDA_ARCHITECTURES=70 \
         -DCMAKE_BUILD_TYPE=Release \
         -DNINFER_BUILD_APPS=ON \
-        -DBUILD_TESTING=OFF \
+        -DBUILD_TESTING=ON \
         -DNINFER_BUILD_BENCHMARKS=OFF \
-    && cmake --build /build --parallel --target ninfer ninfer-serve
+    && cmake --build /build --parallel --target ninfer ninfer-serve \
+        ninfer_openai_schema_test ninfer_openai_responses_test \
+    && ctest --test-dir /build --output-on-failure --no-tests=error \
+        -R '^ninfer_openai_(schema|responses)_test$'
 
 FROM nvidia/cuda:12.8.1-runtime-ubuntu24.04
 

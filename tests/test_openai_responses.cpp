@@ -948,6 +948,35 @@ int test_previous_response_call_graph() {
     return failures;
 }
 
+int test_optional_reasoning_summary() {
+    Json body = {{"model", "m"}, {"input", "hello"},
+                 {"reasoning", Json{{"effort", "none"}, {"summary", "concise"}}}};
+    int failures = 0;
+    for (const Json summary : {Json("concise"), Json("auto"), Json("detailed"), Json(nullptr)}) {
+        body["reasoning"]["summary"] = summary;
+        const auto request = parse_openai_responses_create_request(body, limits());
+        const auto response = make_openai_response_object(
+            "resp_summary", 123, request, OpenAIResponsesRuntimeValues{}, sample_outcome());
+        failures += check(request.prompt.generation.reasoning_effort == RequestedReasoningEffort::None &&
+                              response.body.at("reasoning").at("summary").is_null() &&
+                              response.body.at("output")[0].at("summary").empty(),
+                          "summary preference preserves effort without claiming a generated summary");
+    }
+    for (const Json invalid : {Json("unknown"), Json(true), Json::object()}) {
+        body["reasoning"]["summary"] = invalid;
+        failures += check(api_error([&] {
+                              (void)parse_openai_responses_create_request(body, limits());
+                          }).param == "reasoning",
+                          "invalid summary preferences remain rejected");
+    }
+    body["reasoning"] = Json{{"summary", "concise"}, {"context", "all_turns"}};
+    failures += check(api_code([&] {
+                          (void)parse_openai_responses_create_request(body, limits());
+                      }) == "reasoning_option_not_supported",
+                      "accepting summary does not relax other reasoning options");
+    return failures;
+}
+
 int test_response_object() {
     const OpenAIResponsesCreateRequest request =
         parse_openai_responses_create_request(Json{{"model", "m"},
@@ -1180,6 +1209,7 @@ int main() {
     failures += test_explicit_rejections();
     failures += test_previous_response_call_graph();
     failures += test_response_object();
+    failures += test_optional_reasoning_summary();
     failures += test_sse_sequence_and_failures();
     failures += test_input_tokens_uses_shared_state_path();
     failures += test_disabled_response_store();
