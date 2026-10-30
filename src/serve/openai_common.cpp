@@ -38,6 +38,13 @@ std::string responses_identifier(std::string_view prefix) {
 
 using Json = nlohmann::json;
 
+bool is_ignored_openai_hosted_tool(const RequestJson& tool) {
+    if (!tool.is_object() || !tool.contains("type")) { return false; }
+    if (tool.contains("execution") && tool.at("execution") != "server") { return false; }
+    const auto& type = tool.at("type");
+    return type == "code_interpreter" || type == "web_search" || type == "tool_search";
+}
+
 bool parse_openai_prompt_cache_breakpoint(const RequestJson& value, std::string_view param) {
     if (!value.contains("prompt_cache_breakpoint") ||
         value.at("prompt_cache_breakpoint").is_null()) {

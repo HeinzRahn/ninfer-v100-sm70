@@ -672,7 +672,8 @@ struct ParsedFunctionTool {
 ParsedFunctionTool
 parse_function_tool(const Json& item, std::optional<std::string> wire_namespace,
                     std::string_view namespace_description,
-                    std::unordered_map<std::string, OpenAIResponsesFunctionIdentity>& identities) {
+                    std::unordered_map<std::string, OpenAIResponsesFunctionIdentity>& identities,
+                    bool eager_loading) {
     static const std::unordered_set<std::string> allowed_members = {
         "type",          "name",         "description", "parameters", "strict", "allowed_callers",
         "defer_loading", "output_schema"};
@@ -718,8 +719,11 @@ parse_function_tool(const Json& item, std::optional<std::string> wire_namespace,
             bad_request("function defer_loading must be a boolean", "tools");
         }
         if (item.at("defer_loading").get<bool>()) {
-            bad_request("deferred tool loading is not supported", "tools",
-                        "deferred_tools_not_supported");
+            if (!eager_loading || !item.contains("parameters") ||
+                !item.at("parameters").is_object()) {
+                bad_request("deferred tools require hosted tool_search and supplied parameters",
+                            "tools", "deferred_tools_not_supported");
+            }
         }
     }
     if (item.contains("allowed_callers") && !item.at("allowed_callers").is_null()) {
@@ -765,6 +769,12 @@ void parse_tools(const Json& body, ParsedPromptFields& out) {
     if (!body.contains("tools") || body.at("tools").is_null()) { return; }
     if (!body.at("tools").is_array()) { bad_request("tools must be an array", "tools"); }
 
+    // Replace hosted discovery with eager loading of supplied functions, keeping namespace IDs.
+    const bool eager_loading = std::any_of(
+        body.at("tools").begin(), body.at("tools").end(), [](const Json& item) {
+            return is_ignored_openai_hosted_tool(item) && item.at("type") == "tool_search";
+        });
+
     static const std::unordered_set<std::string> namespace_members = {"type", "name", "description",
                                                                       "tools"};
     std::unordered_set<std::string> declared_names;
@@ -783,9 +793,10 @@ void parse_tools(const Json& body, ParsedPromptFields& out) {
             bad_request("tools entries must be objects with a string type", "tools");
         }
         const std::string type = item.at("type").get<std::string>();
+        if (is_ignored_openai_hosted_tool(item)) { continue; }
         if (type == "function") {
-            out.wire_tools.push_back(
-                append_function(parse_function_tool(item, std::nullopt, {}, out.tool_identities)));
+            out.wire_tools.push_back(append_function(parse_function_tool(
+                item, std::nullopt, {}, out.tool_identities, eager_loading)));
             continue;
         }
         if (type != "namespace") {
@@ -826,7 +837,7 @@ void parse_tools(const Json& body, ParsedPromptFields& out) {
                             "tools", "tool_type_not_supported");
             }
             canonical["tools"].push_back(append_function(parse_function_tool(
-                nested, namespace_name, namespace_description, out.tool_identities)));
+                nested, namespace_name, namespace_description, out.tool_identities, eager_loading)));
         }
         out.wire_tools.push_back(std::move(canonical));
     }

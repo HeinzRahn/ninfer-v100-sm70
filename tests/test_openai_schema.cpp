@@ -373,6 +373,26 @@ int test_tools() {
     failures += check(api_error([&] { (void)parse(body); }).code == "tool_type_not_supported",
                       "custom tools rejected");
 
+    for (const char* type : {"code_interpreter", "web_search", "tool_search"}) {
+        body = base_request();
+        body["tools"] = Json::array({Json{{"type", type}}, function_tool("web_search")});
+        const auto filtered = parse(body).generation;
+        failures += check(filtered.tools.size() == 1 && filtered.tools[0].name == "web_search",
+                          "hosted declarations are omitted without dropping namesake functions");
+        body["tool_choice"] = Json{{"type", type}};
+        failures += check(api_error([&] { (void)parse(body); }).param == "tool_choice",
+                          "explicit hosted tool selection remains unsupported");
+        body.erase("tool_choice");
+        body["tools"][0]["execution"] = "client";
+        failures += check(api_error([&] { (void)parse(body); }).code == "tool_type_not_supported",
+                          "client-executed declarations are not silently dropped");
+        body["tools"] = Json::array({Json{{"type", type}}});
+        failures += check(parse(body).generation.tools.empty(), "hosted-only list becomes empty");
+        body["tool_choice"] = "required";
+        failures += check(api_error([&] { (void)parse(body); }).param == "tool_choice",
+                          "hosted-only list cannot satisfy required tool choice");
+    }
+
     body                        = base_request();
     body["tools"]               = Json::array({function_tool()});
     body["parallel_tool_calls"] = false;

@@ -615,6 +615,7 @@ void parse_tools(const Json& body, GenerationRequest& output) {
             bad_request("tools entries must contain a string type", "tools");
         }
         const std::string type = item.at("type").get<std::string>();
+        if (is_ignored_openai_hosted_tool(item)) { continue; }
         if (type != "function") {
             bad_request(
                 "tool type '" + type +

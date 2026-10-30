@@ -536,6 +536,41 @@ int test_tools_and_effective_subset() {
                           request.prompt.generation.tools[0].name == "clock",
                       "wire tool list and effective callable subset remain distinct");
 
+    Json hosted = body;
+    hosted["tools"][1]["defer_loading"] = true;
+    hosted["tools"][1]["parameters"] = Json{{"type", "object"}};
+    for (const char* type : {"code_interpreter", "web_search", "tool_search"}) {
+        hosted["tools"].push_back(Json{{"type", type}});
+    }
+    const auto eager = parse_openai_responses_create_request(hosted, limits());
+    failures += check(eager.tools.size() == 2 && eager.tools[1]["defer_loading"] == false &&
+                          eager.prompt.generation.tools.size() == 1 &&
+                          eager.prompt.generation.tools[0].name == "clock",
+                      "hosted discovery loads supplied functions eagerly and preserves allowed_tools");
+    hosted["tools"][1].erase("parameters");
+    failures += check(api_code([&] { (void)parse_openai_responses_create_request(hosted, limits()); }) ==
+                          "deferred_tools_not_supported",
+                      "missing deferred schemas are not replaced with empty definitions");
+    for (const char* type : {"code_interpreter", "web_search", "tool_search"}) {
+        Json only = {{"model", "m"}, {"input", "hello"},
+                     {"tools", Json::array({Json{{"type", type}}})}};
+        const auto filtered = parse_openai_responses_create_request(only, limits());
+        failures += check(filtered.tools.empty() && filtered.prompt.generation.tools.empty(),
+                          "hosted tools are absent from both prompt and response echo");
+        only["tool_choice"] = Json{{"type", type}};
+        failures += check(api_code([&] { (void)parse_openai_responses_create_request(only, limits()); }) ==
+                              "tool_choice_not_supported",
+                          "explicit hosted selection remains unsupported");
+        only["tool_choice"] = "required";
+        failures += check(!api_code([&] { (void)parse_openai_responses_create_request(only, limits()); }).empty(),
+                          "required tool choice cannot be satisfied by removed declarations");
+        only.erase("tool_choice");
+        only["tools"][0]["execution"] = "client";
+        failures += check(api_code([&] { (void)parse_openai_responses_create_request(only, limits()); }) ==
+                              "tool_type_not_supported",
+                          "client-executed tools remain rejected");
+    }
+
     Json none           = body;
     none["tool_choice"] = "none";
     const OpenAIResponsesCreateRequest disabled =
@@ -590,6 +625,16 @@ int test_namespace_tools() {
     failures += check(request.tools.size() == 2 && request.tools[0].at("type") == "namespace" &&
                           request.tools[0].at("tools")[0].at("name") == "now",
                       "wire namespace grouping is retained in the response echo");
+    Json deferred = body;
+    deferred["tools"][0]["tools"][0]["defer_loading"] = true;
+    deferred["tools"].push_back(Json{{"type", "tool_search"}, {"execution", "server"}});
+    const auto eager = parse_openai_responses_create_request(deferred, limits());
+    failures += check(eager.prompt.generation.tools[0].name == "mcp__clock__now" &&
+                          eager.tool_identities.at("mcp__clock__now").wire_namespace == "mcp__clock" &&
+                          eager.tools[0]["tools"][0]["defer_loading"] == false &&
+                          eager.prompt.generation.tools[0].input_schema_json ==
+                              request.prompt.generation.tools[0].input_schema_json,
+                      "eager namespace functions preserve schemas and wire identities");
     failures += check(request.prompt.generation.tools.size() == 1 &&
                           request.prompt.generation.tools[0].name == "mcp__clock__now" &&
                           request.prompt.generation.tools[0].description ==
