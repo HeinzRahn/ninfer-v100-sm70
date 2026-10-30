@@ -562,7 +562,9 @@ int test_tools_and_effective_subset() {
                               "tool_choice_not_supported",
                           "explicit hosted selection remains unsupported");
         only["tool_choice"] = "required";
-        failures += check(!api_code([&] { (void)parse_openai_responses_create_request(only, limits()); }).empty(),
+        const ApiError required_error = api_error(
+            [&] { (void)parse_openai_responses_create_request(only, limits()); });
+        failures += check(required_error.status == 400 && required_error.param == "tool_choice",
                           "required tool choice cannot be satisfied by removed declarations");
         only.erase("tool_choice");
         only["tools"][0]["execution"] = "client";
